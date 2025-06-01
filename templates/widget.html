@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Chat Widget</title>
+  <style>
+    /* Reset */
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: Arial, sans-serif;
+      margin: 0; padding: 0;
+      background: #f9f9f9;
+    }
+
+    /* Floating widget container */
+    #chat-widget {
+      position: fixed;
+      bottom: 20px;
+      right: 20px;
+      width: 350px;
+      min-height: 450px;
+      box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+      border-radius: 10px;
+      overflow: hidden;
+      font-size: 14px;
+      display: flex;
+      flex-direction: column;
+      background: white;
+      transition: all 0.3s ease;
+      transform: translateY(0);
+      z-index: 9999;
+      display: none; /* Initially hidden */
+    }
+
+    /* Open state */
+    #chat-widget.open {
+      display: flex;
+      transform: translateY(0);
+    }
+
+    /* Header */
+    #chat-header {
+      background: #27ae60;
+      color: white;
+      padding: 12px 15px;
+      cursor: pointer;
+      font-weight: bold;
+      user-select: none;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    #chat-header span {
+      user-select: none;
+    }
+
+    #chat-header button {
+      background: transparent;
+      border: none;
+      color: white;
+      font-size: 18px;
+      cursor: pointer;
+      line-height: 1;
+    }
+
+    /* Chat messages area */
+    #chat {
+      flex-grow: 1;
+      padding: 10px 15px;
+      overflow-y: auto;
+      background: #fefefe;
+    }
+
+    /* Typing indicator */
+    #typing-indicator {
+      font-style: italic;
+      color: #888;
+      height: 18px;
+      margin: 0 15px 5px 15px;
+      display: none;
+    }
+
+    /* Input area */
+    #input-area {
+      display: flex;
+      padding: 10px 15px;
+      border-top: 1px solid #ddd;
+      background: #fafafa;
+    }
+
+    #messageInput {
+      flex-grow: 1;
+      padding: 8px 12px;
+      font-size: 14px;
+      border: 1px solid #ccc;
+      border-radius: 20px;
+      outline: none;
+      transition: border-color 0.2s ease;
+    }
+    #messageInput:focus {
+      border-color: #27ae60;
+    }
+
+    #sendBtn {
+      margin-left: 10px;
+      background: #27ae60;
+      border: none;
+      color: white;
+      font-weight: bold;
+      padding: 8px 16px;
+      border-radius: 20px;
+      cursor: pointer;
+      transition: background-color 0.2s ease;
+    }
+    #sendBtn:hover {
+      background: #219150;
+    }
+
+    /* Message styling */
+    .message {
+      margin: 5px 0;
+      line-height: 1.3;
+      max-width: 75%;
+      padding: 10px 15px;
+      border-radius: 18px;
+      clear: both;
+      word-wrap: break-word;
+      white-space: pre-wrap;
+    }
+    .visitor {
+      background: #2980b9;
+      color: white;
+      float: right;
+      border-bottom-right-radius: 0;
+      text-align: right;
+    }
+    .agent {
+      background: #27ae60;
+      color: white;
+      float: left;
+      border-bottom-left-radius: 0;
+      text-align: left;
+    }
+
+  </style>
+</head>
+<body>
+
+<!-- Chat toggle button -->
+<button id="chat-toggle" style="
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  background: #27ae60;
+  border: none;
+  color: white;
+  border-radius: 50%;
+  width: 56px;
+  height: 56px;
+  font-size: 30px;
+  cursor: pointer;
+  box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+  z-index: 10000;
+">💬</button>
+
+<!-- Floating chat widget -->
+<div id="chat-widget">
+  <div id="chat-header">
+    <span>Support Chat</span>
+    <button id="close-chat" title="Close chat">&times;</button>
+  </div>
+
+  <div id="chat"></div>
+  <div id="typing-indicator"></div>
+
+  <div id="input-area">
+    <input type="text" id="messageInput" placeholder="Type your message" autocomplete="off" />
+    <button id="sendBtn">Send</button>
+  </div>
+</div>
+
+<script src="https://cdn.socket.io/4.6.1/socket.io.min.js"></script>
+<script>
+  const socket = io();
+
+  let visitor_id = localStorage.getItem('visitor_id');
+  if (!visitor_id) {
+    visitor_id = self.crypto.randomUUID();
+    localStorage.setItem('visitor_id', visitor_id);
+  }
+
+  const chatWidget = document.getElementById('chat-widget');
+  const chatToggle = document.getElementById('chat-toggle');
+  const closeChatBtn = document.getElementById('close-chat');
+  const chatDiv = document.getElementById('chat');
+  const typingIndicator = document.getElementById('typing-indicator');
+  const messageInput = document.getElementById('messageInput');
+  const sendBtn = document.getElementById('sendBtn');
+
+  // Show/hide widget on toggle click
+  chatToggle.addEventListener('click', () => {
+    chatWidget.classList.add('open');
+    chatToggle.style.display = 'none';
+    messageInput.focus();
+  });
+
+  closeChatBtn.addEventListener('click', () => {
+    chatWidget.classList.remove('open');
+    chatToggle.style.display = 'block';
+  });
+
+  // Join room for this visitor_id when connected
+  socket.on('connect', () => {
+    socket.emit('join', { visitor_id: visitor_id });
+    appendMessage('System', `You joined the chat.`);
+  });
+
+  // Send message handler
+  sendBtn.addEventListener('click', () => {
+    sendMessage();
+  });
+
+  messageInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      sendMessage();
+    }
+  });
+
+  function sendMessage() {
+    const message = messageInput.value.trim();
+    if (message === '') return;
+
+    socket.emit('send_message', {
+      visitor_id: visitor_id,
+      sender: 'Visitor',
+      message: message
+    });
+    messageInput.value = '';
+    socket.emit('stop_typing', { visitor_id, sender: 'Visitor' });
+  }
+
+  // Typing indicator logic
+  let typingTimeout;
+  messageInput.addEventListener('input', () => {
+    const text = messageInput.value.trim();
+    socket.emit('typing', { visitor_id, sender: 'Visitor', text });
+
+    clearTimeout(typingTimeout);
+    typingTimeout = setTimeout(() => {
+      socket.emit('stop_typing', { visitor_id, sender: 'Visitor' });
+    }, 1000);
+  });
+
+  // Display received messages
+  socket.on('receive_message', (data) => {
+    appendMessage(data.sender, data.message);
+  });
+
+  // Show typing indicator when agent is typing
+  socket.on('show_typing', ({ sender }) => {
+    if (sender === 'Agent') {
+      typingIndicator.style.display = 'block';
+      typingIndicator.textContent = 'Agent is typing...';
+    }
+  });
+
+  socket.on('hide_typing', () => {
+    typingIndicator.style.display = 'none';
+  });
+
+  // Append message to chat window
+  function appendMessage(sender, message) {
+    const msgDiv = document.createElement('div');
+    msgDiv.classList.add('message');
+    msgDiv.classList.add(sender.toLowerCase());
+    msgDiv.textContent = `${sender}: ${message}`;
+    chatDiv.appendChild(msgDiv);
+    chatDiv.scrollTop = chatDiv.scrollHeight;
+  }
+</script>
+
+</body>
+</html>
